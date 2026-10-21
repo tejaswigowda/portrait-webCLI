@@ -17,6 +17,7 @@ Audit of this repository's page (`docs/`), the bind code (`docs/lib/`), the auto
 | **Face GLB** | In memory, optional local download. **Contains the photo crop as its texture**, a 478-point face mesh, the photo's expression as morph weights, and the measurements above | Only if you download it and share it |
 | **Bound VRM** | In memory, local download. Contains the base VRM, the bind block (generic morph names and counts only) and, if you left them on, reshaped face and hair geometry, tinted colors and, if the photo had facial hair, a painted face texture derived from the photo | Only if you download it and share it |
 | **Preview** | Decoded copies of the base and bound VRM in GPU/CPU memory, posed with the photo's expression | No |
+| **Look editor** (optional, **Edit the look**) | The bound VRM is handed to the editor iframe (`docs/editor/`, same origin) by `postMessage` with this origin as the target, and the edited VRM comes back the same way. The editor decodes it in its own document (textures included) | No. Its CSP allows this origin and in-memory data only; both ends check `origin` and `source`; it has no camera access |
 | **`window.__webcli_result`** | Holds the result bytes (as a lazy data URL), the face GLB, the expression scores and the report, so an agent can read them | No, but any script in the page can read it |
 
 Worth knowing:
@@ -47,7 +48,7 @@ What the host that serves the page can see: your IP address and user agent, the 
 |---|---|
 | **No network code** | The bind, face, hair, reshape, preview and autorigger modules have no `fetch`, XHR, WebSocket, beacon, storage, `postMessage`, `BroadcastChannel` or computed dynamic import. `tests/static.test.mjs` scans every file |
 | **Local-only inputs** | A URL for the photo or face GLB is rejected (`IMAGE_MUST_BE_LOCAL`, `FACE_MUST_BE_LOCAL`); `?image=` and `?face=` are ignored |
-| **Content-Security-Policy** (`<meta>`) | `default-src 'none'`; `script-src 'self' 'wasm-unsafe-eval'` plus the hash of the one inline import map; `style-src 'self'`; `connect-src 'self' blob: https://raw.githubusercontent.com`; `img-src 'self' blob: data:`; `worker-src 'none'`; `form-action 'none'`; `base-uri 'none'` |
+| **Content-Security-Policy** (`<meta>`) | `default-src 'none'`; `script-src 'self' 'wasm-unsafe-eval'` plus the hash of the one inline import map; `style-src 'self'`; `connect-src 'self' blob: https://raw.githubusercontent.com`; `img-src 'self' blob: data:`; `worker-src 'none'`; `frame-src 'self'` (the look editor); `form-action 'none'`; `base-uri 'none'` |
 | **`no-referrer`** | `<meta name="referrer" content="no-referrer">` |
 | **Egress guard** (`egressGuard.js`, loaded first) | `fetch` and XHR allowed only for `GET` without a body, a URL up to 2048 characters, and a destination that is this origin, `blob:`, `data:`, or the exact base-VRM URL you typed (registered just before it is fetched). Blocks everything else, plus `sendBeacon`, `WebSocket`, `EventSource`, WebRTC, `WebTransport` and `window.open`. Logs every request, shown in the **Network audit** card and in `window.__portrait_net` |
 | **Vendored, hashed models** | MediaPipe JS, wasm and both models are served from this origin; their SHA-256s are in `docs/vendor/mediapipe/README.md` and checked by a test |
@@ -65,7 +66,8 @@ What the host that serves the page can see: your IP address and user agent, the 
 | **A compromised or malicious host serving different code** | **No.** The same host delivers the page, the CSP and the guard, so it can change all three. Real response headers do not change this. Mitigate by running a local copy (`npm start`), pinning a reviewed commit, or self-hosting |
 | **Browser extensions, devtools, OS-level capture, screenshots** | No (out of scope) |
 | **You sharing a downloaded file** | No. The face GLB (photo crop) and the bound VRM (derived geometry and colors) are yours to protect |
-| **A tool you open the bound VRM in afterwards** | No. The claim covers this page only. [look-webCLI](https://github.com/tejaswigowda/look-webCLI) is a separate origin with its own claim; Strata can commit to Git with a token and call optional external AI |
+| **A tool you open the bound VRM in afterwards** | No. The claim covers this page and its embedded look editor only. [look-webCLI](https://github.com/tejaswigowda/look-webCLI) standalone is a separate origin with its own claim; Strata can commit to Git with a token and call optional external AI |
+| **A crafted VRM exploiting the embedded editor** | Partly. The editor has its own strict CSP (no remote host, no eval, no inline script, `connect-src` this origin and in-memory data), so a crafted file cannot send data out; it can still crash or misrender the editor. The editor is a third-party build (VRMEditorTools), pinned and scanned by `tests/static.test.mjs` |
 
 ## 5. Hosting notes
 

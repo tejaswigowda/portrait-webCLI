@@ -115,6 +115,12 @@ pre { font-family: var(--mono); font-size: .74rem; background: #090b14; border: 
 /* the bind card stays in view beside the longer preview and report */
 @media (min-width: 901px) { #bindCard { position: sticky; bottom: 12px; z-index: 5; box-shadow: 0 -6px 18px rgba(0,0,0,.35); } }
 
+/* the look editor (docs/editor, same origin) in a full-page overlay */
+#editOverlay { position: fixed; inset: 0; z-index: 1000; background: var(--bg); display: flex; flex-direction: column; padding: 14px; gap: 10px; }
+#editOverlay .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#editOverlay .bar .muted { flex: 1; min-width: 200px; }
+#editOverlay iframe { flex: 1; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+
 footer { max-width: 1280px; margin: 0 auto; padding: 8px 24px 40px; }
 footer .card-body { gap: 8px; font-size: .8rem; color: var(--muted); }
 footer ul { display: flex; flex-direction: column; gap: 4px; }

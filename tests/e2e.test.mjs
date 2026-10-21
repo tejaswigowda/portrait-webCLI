@@ -124,6 +124,55 @@ await test( 'the female base is selectable by name', async () => {
 
 } );
 
+await test( 'the look editor opens on the bound VRM inside the page (same origin), and Done brings the edited VRM back into the result and the download', async () => {
+
+	const { ctx, page, log } = await open( '?vrm=male&run=bind' );
+	await page.setInputFiles( '[data-testid=face-input]', faceFile );
+	await settled( page );
+	const before = await resultOf( page );
+	await page.click( '[data-testid=edit]' );
+	ok( await page.isVisible( '#editOverlay' ), 'the overlay did not open' );
+	const frame = page.frameLocator( '#editFrame' );
+	await frame.locator( 'canvas' ).first().waitFor( { timeout: 60000 } );
+	// the editor needs a moment to parse the VRM it was handed; press Done until it answers
+	let closed = false;
+	for ( let i = 0; i < 8 && ! closed; i ++ ) {
+
+		await page.waitForTimeout( 4000 );
+		if ( await page.isEnabled( '[data-testid=edit-done]' ) ) await page.click( '[data-testid=edit-done]' );
+		closed = await page.waitForSelector( '#editOverlay', { state: 'hidden', timeout: 12000 } ).then( () => true, () => false );
+
+	}
+	ok( closed, 'Done never brought the VRM back' );
+	await page.waitForSelector( 'body[data-webcli-status=done]', { timeout: 60000 } );
+	const after = await resultOf( page );
+	ok( after.ok && after.op === 'bind' && after.artifact.name === before.artifact.name, JSON.stringify( after ) );
+	eq( await page.evaluate( () => window.__webcli_result.meta.edited ), true, 'the result is not marked edited' );
+	eq( bytesOf( after.artifact.dataUrl ).subarray( 0, 4 ).toString(), 'glTF' );
+	ok( ( await page.textContent( '[data-testid=download]' ) ).includes( 'edited' ), 'the download link is not the edited VRM' );
+	ok( external( log ).length === 0, 'external request: ' + external( log ).map( r => r.url ).join( ', ' ) );
+	ok( log.requests.every( r => r.method === 'GET' && ! r.body ), 'a request is not a bodyless GET' );
+	await ctx.close();
+
+} );
+
+await test( 'Cancel closes the editor and keeps the bound VRM as it was; the editor is refused before a bind', async () => {
+
+	const { ctx, page } = await open( '?vrm=male&run=bind' );
+	await page.evaluate( () => document.getElementById( 'editBtn' ).click() ); // the button is hidden until a bind: a script can still press it
+	ok( ! ( await page.isVisible( '#editOverlay' ) ), 'the editor opened with nothing bound' );
+	await page.setInputFiles( '[data-testid=face-input]', faceFile );
+	await settled( page );
+	const before = ( await resultOf( page ) ).artifact.size;
+	await page.click( '[data-testid=edit]' );
+	await page.click( '[data-testid=edit-cancel]' );
+	ok( ! ( await page.isVisible( '#editOverlay' ) ) );
+	eq( ( await resultOf( page ) ).artifact.size, before );
+	eq( await page.evaluate( () => window.__webcli_result.meta.edited ), undefined );
+	await ctx.close();
+
+} );
+
 await test( 'works with the network switched off, once the page has loaded (local VRM file: the bundled bases are fetched on Bind)', async () => {
 
 	const { ctx, page, log } = await open( '?run=bind', { offline: true } );

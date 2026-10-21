@@ -13,7 +13,7 @@ This tool is a reference implementation of the **Web-CLI** architecture, applied
 > Tejaswi Gowda, Arizona State University.
 > arXiv: https://arxiv.org/abs/2608.28950
 
-Part of the Web-CLI family, alongside [ffmpeg-webCLI](https://github.com/tejaswigowda/ffmpeg-webCLI), [whisper-webCLI](https://github.com/tejaswigowda/whisper-webCLI), [3mf-webCLI](https://github.com/tejaswigowda/3mf-webCLI), [bodyrig-webCLI](https://github.com/tejaswigowda/bodyrig-webCLI), [look-webCLI](https://github.com/tejaswigowda/look-webCLI) and [Strata](https://github.com/tejaswigowda/strata-editor). It was cut from Strata's `docs/facebind/`; [look-webCLI](https://github.com/tejaswigowda/look-webCLI) is the cut of the VRM editor that used to open inside it. **portrait-webCLI makes the bound VRM, look-webCLI edits its textures, materials and outfit, bodyrig-webCLI bakes motion onto it.**
+Part of the Web-CLI family, alongside [ffmpeg-webCLI](https://github.com/tejaswigowda/ffmpeg-webCLI), [whisper-webCLI](https://github.com/tejaswigowda/whisper-webCLI), [3mf-webCLI](https://github.com/tejaswigowda/3mf-webCLI), [bodyrig-webCLI](https://github.com/tejaswigowda/bodyrig-webCLI), [look-webCLI](https://github.com/tejaswigowda/look-webCLI) and [Strata](https://github.com/tejaswigowda/strata-editor). It was cut from Strata's `docs/facebind/`. [look-webCLI](https://github.com/tejaswigowda/look-webCLI) is the cut of the VRM editor that opens inside it (**Edit the look**), and also stands on its own. **portrait-webCLI makes the bound VRM, look-webCLI edits its textures, materials and outfit, bodyrig-webCLI bakes motion onto it.**
 
 ## Run it
 
@@ -35,6 +35,7 @@ photo (local File) -> MediaPipe Face Landmarker (on device, CPU) -> face-blendsh
 - **Rig-safe.** The skeleton, skin weights, morph deltas, textures, hair and body are carried through byte for byte. The only changes are the bind block, the face's and hair's own vertex positions and normals, material colors, optionally one appended face texture, and (optionally) the hair left out. The outfit is never touched. `bindVRM` audits this before it writes and refuses (`RIG_UNSAFE`) if anything else would change. The face GLB's mesh is never grafted on.
 - **Preview** (three.js, on device): bound or base, flat or toon-lit, expression from the photo, neutral or sliders, and a bald toggle that re-binds without reading the face again.
 - **Face GLB download**: the face-blendshape GLB made from the photo (it embeds a crop of the photo: see [Privacy](#privacy-and-the-threat-model)).
+- **Edit the look** (button on the Preview card): opens the [look-webCLI](https://github.com/tejaswigowda/look-webCLI) editor (a VRMEditorTools build: textures, colors, materials, meta, spring bones, accessories, outfits) **inside the page**, on the bound VRM. **Done** bakes the edits and brings the edited VRM back into the preview, the download and `window.__webcli_result` (`meta.edited: true`); **Cancel** keeps the VRM as it was. The editor is a copy of look-webCLI's `docs/editor/` served from this origin in an iframe: the VRM goes to it and comes back over origin- and source-checked `postMessage` (target origin always this origin, never `*`), and the editor's own CSP allows this origin and in-memory data only. Binding again starts from the base VRM and discards the edits.
 
 The output is a standard VRM (glTF 2.0) with an `extensions.STRATA_face_bind` block that carries only generic morph names and counts.
 
@@ -113,6 +114,7 @@ PORTRAIT_TEST_IMAGE=face.jpg npm test   # also runs the photo path
 - **`connect-src`** allows `https://raw.githubusercontent.com` so a base VRM can be fetched from a URL you type. The guard blocks it unless that exact URL was registered. Add your own host to the CSP if you need another.
 - **CPU inference** (no GPU delegate) keeps the output reproducible; a large photo takes a few seconds on the main thread, so the page yields between steps to repaint.
 - The face model assumes **one clear, front-facing face**. No face detected is an error (`NO_FACE_DETECTED`).
+- **The editor re-exports the VRM.** After **Done** the file is the editor's own output, not the byte-audited bind output: the rig-safety audit (face and hair bytes only) applies to the bind, not to what you change in the editor. The editor is a patched third-party build, so it is pinned and checked by the static tests (strict CSP, no analytics, `look-*` protocol only).
 - **Not on webcli.app yet.** This origin is not in [tools.json](https://webcli.app/tools.json); its entry would be `kind: artifact`, `egress: none`, `fetches: []`, `agent: true`, `deterministic: verified`.
 
 ## Layout
@@ -128,6 +130,7 @@ docs/                 GitHub Pages root
   lib/facebind/       the bind: GLB I/O, face-source reading, bindVRM, reshape, hair, scalp, facial hair
   lib/face/           the face reference and the face warp (FaceRefine)
   base/               the two bundled VRoid base VRMs, unmodified (see base/README.md)
+  editor/             the look editor: a copy of look-webCLI's docs/editor/ (VRMEditorTools build, MIT), framed by the Edit button
   vendor/three/       three.js + the three addons the page uses
   vendor/mediapipe/   MediaPipe Tasks Vision (JS + SIMD wasm) and the two models, with SHA-256s
 tests/                unit, static and browser tests
@@ -139,6 +142,7 @@ tests/                unit, static and browser tests
 - **Autorigger:** `docs/autorig/` vendors [face-to-blendshape-3d](https://github.com/tejaswigowda/face-to-blendshape-3d) (MIT, `docs/autorig/LICENSE`, commit `c656b22`) plus this tool's on-device glue.
 - **MediaPipe** Tasks Vision, the Face Landmarker and the Hair Segmenter: Google, Apache-2.0 (`docs/vendor/mediapipe/README.md` lists sources and hashes).
 - **three.js** (MIT, `docs/vendor/three/LICENSE`).
+- **Look editor:** `docs/editor/` is the [look-webCLI](https://github.com/tejaswigowda/look-webCLI) build of [cecil-tools/VRMEditorTools](https://github.com/cecil-tools/VRMEditorTools) (MIT, `docs/editor/LICENSE-VRMEditorTools.txt`), patched for zero egress and the `look-*` embed protocol. To refresh it, copy `docs/editor/` from a look-webCLI checkout (`scripts/sync-editor.sh ../look-webCLI`) and run `npm test`.
 
 ## License
 

@@ -123,6 +123,8 @@ async function encodePNG( rgba, width, height ) {
 }
 
 let photoCache = null; // the last photo's reading, so toggling bald re-binds without reading the face again
+let last = null; // the last bind (bytes, bind map, expression): what the look editor opens, and what its result replaces in the preview and the download
+let lastMeta = null; // the last result's meta, carried into the result after an edit
 
 async function run( { vrm, image, face, look, shape, hairShape, hairStyle, facialHair, bald, names } ) {
 
@@ -210,13 +212,13 @@ async function run( { vrm, image, face, look, shape, hairShape, hairStyle, facia
 		const risky = bind.source.nameResolution === 'convention' || bind.source.nameResolution === 'unresolved';
 		$( 'resolutionWarn' ).hidden = ! risky;
 		if ( risky ) $( 'resolutionWarn' ).textContent = 'Check the mapping: ' + bind.warnings.join( ' ' );
+		last = { base: vrmBytes, bytes, bind, expression, filename };
 		await progress( 92, 'Drawing the preview' );
 		await showPreview( vrmBytes, bytes, bind, expression );
 		progressEnd( 'Done' );
-		window.__webcli_result = {
-			ok: true, op: 'bind', artifact: artifactOf( bytes, filename ), error: null,
-			meta: { nameResolution: report.nameResolution, warnings: report.warnings, mapped: report.mapped, sourceMorphs: report.sourceMorphs, scope: SCOPE, source: image ? 'photo' : 'face-glb', faceGlb: image ? artifactOf( faceBytes, 'face-model-blendshapes.glb' ) : null, expression, report },
-		};
+		const meta = { nameResolution: report.nameResolution, warnings: report.warnings, mapped: report.mapped, sourceMorphs: report.sourceMorphs, scope: SCOPE, source: image ? 'photo' : 'face-glb', faceGlb: image ? artifactOf( faceBytes, 'face-model-blendshapes.glb' ) : null, expression, report };
+		lastMeta = meta;
+		window.__webcli_result = { ok: true, op: 'bind', artifact: artifactOf( bytes, filename ), error: null, meta };
 		webcliStatus( 'done' );
 		say( `Bound ${ report.mapped } of ${ report.sourceMorphs } face morphs${ risky ? ' (names ASSUMED, see the warning below)' : '' }. ${ SCOPE }.`, risky ? 'err' : 'ok' );
 		if ( runOp && params.get( 'download' ) === '1' ) a.click();
@@ -436,6 +438,63 @@ const preloaded = preload();
 
 window.__portrait = { run, preview: () => preview, preload: () => preloaded, network: () => window.__portrait_net };
 window.__webcli_result = null;
+
+// ── the look editor (docs/editor, the look-webCLI build, same origin) in an overlay ──────────────────────
+// The bound VRM goes to the iframe by postMessage and the edited VRM comes back the same way. Both ends check that the message is from this origin and from the other
+// window, and the target origin is always this origin (never '*'), so nothing else can read or feed the VRM. The editor's own CSP allows connections to this origin
+// and in-memory data only. Protocol: look-editor-ready -> look-load-vrm { name, bytes }; look-apply -> look-edited-vrm { bytes } | look-apply-failed.
+const editFrame = $( 'editFrame' );
+function closeEditor() { $( 'editOverlay' ).hidden = true; editFrame.removeAttribute( 'src' ); }
+$( 'editBtn' ).addEventListener( 'click', () => {
+
+	if ( ! last ) { say( 'Bind first: the editor opens the bound VRM.', 'err' ); return; }
+	$( 'editOverlay' ).hidden = false;
+	editFrame.src = 'editor/index.html?embed=1';
+
+} );
+// Done asks the editor to bake its edits (accessories and all) into the VRM and send it back; the overlay closes when it arrives
+let doneTimer = 0;
+function setBusy( on ) {
+
+	$( 'editDone' ).textContent = on ? 'Baking…' : 'Done'; $( 'editDone' ).disabled = on;
+	if ( ! on ) progressEnd();
+	clearTimeout( doneTimer );
+	if ( on ) doneTimer = setTimeout( () => { setBusy( false ); say( 'The editor did not answer. Wait for the model to load, then press Done again.', 'err' ); }, 30000 );
+
+}
+$( 'editDone' ).addEventListener( 'click', () => { setBusy( true ); progress( null, 'Baking the edits into the VRM' ); editFrame.contentWindow.postMessage( { type: 'look-apply' }, location.origin ); } );
+const cancelEditor = () => { setBusy( false ); closeEditor(); };
+$( 'editCancel' ).addEventListener( 'click', cancelEditor );
+window.addEventListener( 'keydown', e => { if ( e.key === 'Escape' && ! $( 'editOverlay' ).hidden ) cancelEditor(); } );
+window.addEventListener( 'message', async e => {
+
+	if ( e.origin !== location.origin || e.source !== editFrame.contentWindow || ! e.data ) return;
+	if ( e.data.type === 'look-apply-failed' ) { setBusy( false ); say( 'The editor could not bake the VRM. Nothing was changed.', 'err' ); return; }
+	if ( e.data.type === 'look-editor-ready' && last ) {
+
+		const copy = last.bytes.buffer.slice( last.bytes.byteOffset, last.bytes.byteOffset + last.bytes.byteLength );
+		editFrame.contentWindow.postMessage( { type: 'look-load-vrm', name: last.filename, bytes: copy }, location.origin, [ copy ] );
+
+	} else if ( e.data.type === 'look-edited-vrm' && e.data.bytes instanceof ArrayBuffer && last ) {
+
+		// the edited VRM replaces the bound one in the download, in window.__webcli_result and in the preview
+		const bytes = new Uint8Array( e.data.bytes );
+		const url = makeUrl( new Blob( [ bytes ], { type: 'model/gltf-binary' } ) );
+		const a = $( 'download' ); a.href = url; a.hidden = false; a.textContent = `Download ${ last.filename } (edited, ${ ( bytes.length / 1048576 ).toFixed( 1 ) } MB)`;
+		last.bytes = bytes;
+		webcliStatus( 'running' );
+		window.__webcli_result = { ok: true, op: 'bind', artifact: artifactOf( bytes, last.filename ), error: null, meta: { ...( lastMeta || {} ), edited: true } };
+		setBusy( false );
+		closeEditor();
+		await progress( 80, 'Loading the edited VRM into the preview' );
+		await showPreview( last.base, bytes, last.bind, last.expression );
+		progressEnd( 'Done' );
+		webcliStatus( 'done' );
+		say( 'The edited VRM is in the preview and the download. Binding again starts from the base VRM and discards the edits.', 'ok' );
+
+	}
+
+} );
 
 if ( runInvalid ) {
 

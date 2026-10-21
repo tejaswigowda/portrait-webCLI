@@ -13,7 +13,7 @@
 	The inline import map is allowed by its hash in the CSP below; change one and you must update the other
 	(tests/static.test.mjs checks it). connect-src lists the hosts a base VRM may be fetched from; add yours here if needed.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-CYNi9I4d6NE0yBPCmnvIlZLNevA8AdbMkwJteukfklg='; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' blob: https://raw.githubusercontent.com; worker-src 'none'; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-CYNi9I4d6NE0yBPCmnvIlZLNevA8AdbMkwJteukfklg='; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' blob: https://raw.githubusercontent.com; worker-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="stylesheet" href="style.css">
@@ -116,7 +116,7 @@
 	</div>
 
 	<div class="col">
-		<div id="previewBox" class="card" hidden><div class="card-header">3 &middot; Preview <a class="btn btn-ghost btn-sm" href="https://look.webcli.app/" target="_blank" rel="noopener noreferrer" title="Download the VRM, then open it in look-webCLI to edit textures, materials and outfit. Nothing is sent: it is an ordinary link.">Edit the look in look-webCLI &#8599;</a></div><div class="card-body">
+		<div id="previewBox" class="card" hidden><div class="card-header">3 &middot; Preview <button id="editBtn" data-testid="edit" type="button" class="btn btn-ghost btn-sm" title="Open the look editor (texture, material and outfit editing) on this VRM, in this page">Edit the look</button></div><div class="card-body">
 			<div class="opts">
 				<label><input type="radio" name="view" id="view_bound" checked> Bound (reshaped, recolored)</label>
 				<label><input type="radio" name="view" id="view_base"> Base VRM</label>
@@ -154,5 +154,9 @@
 	<p>The page sets <code>document.body.dataset.webcliStatus</code> (<code>idle | running | done | error</code>) and <code>window.__webcli_result = { ok, op: 'bind', artifact: { mime, name, size, dataUrl }, error, meta }</code>. <code>window.__portrait.run({ vrm, image, face, look, shape, hairShape, hairStyle, facialHair, bald })</code> takes <code>'male'</code> (default), <code>'female'</code>, a URL or a File for <code>vrm</code>, and a File (or Blob or bytes) for <code>image</code> / <code>face</code>. Hooks: <code>data-testid</code> <code>photo-input</code>, <code>face-input</code>, <code>vrm-input</code>, <code>vrm-url</code>, <code>bind</code>, <code>download</code>, <code>result</code>, <code>status</code>.</p>
 </div></div></footer>
 <script type="module" src="page.js"></script>
+<div id="editOverlay" hidden role="dialog" aria-label="Look editor">
+	<div class="bar"><strong>Look editor</strong> <span class="muted small" id="editNote">The VRM is passed to the editor in this page and never leaves the device. <b>Done</b> bakes your edits into the VRM and brings them back here; <b>Cancel</b> keeps the VRM as it was.</span> <a class="btn btn-ghost btn-sm" href="https://github.com/tejaswigowda/look-webCLI" target="_blank" rel="noopener noreferrer">look-webCLI</a> <button id="editDone" data-testid="edit-done" type="button" class="btn btn-success btn-sm">Done</button> <button id="editCancel" data-testid="edit-cancel" type="button" class="btn btn-ghost btn-sm">Cancel</button></div>
+	<iframe id="editFrame" title="Look editor (look-webCLI)" referrerpolicy="no-referrer"></iframe>
+</div>
 </body>
 </html>
