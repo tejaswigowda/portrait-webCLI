@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>portrait-webCLI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="referrer" content="no-referrer">
+<meta name="description" content="Photo in, bound VRM out. Reads a face on your device, makes a face-blendshape GLB from it and binds it to a VRM. 100% local: nothing leaves your browser.">
+<!--
+	Pure transform: (base VRM, photo | face-blendshape GLB) -> bound VRM. Runs entirely on this device.
+	The photo / face GLB are local files only; the page makes GET requests only (static files + the base VRM).
+	The inline import map is allowed by its hash in the CSP below; change one and you must update the other
+	(tests/static.test.mjs checks it). connect-src lists the hosts a base VRM may be fetched from; add yours here if needed.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-CYNi9I4d6NE0yBPCmnvIlZLNevA8AdbMkwJteukfklg='; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' blob: https://raw.githubusercontent.com; worker-src 'none'; form-action 'none'; base-uri 'none'">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+<script src="egressGuard.js"></script>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","three/addons/":"./vendor/three/addons/","@mediapipe/tasks-vision":"./vendor/mediapipe/vision_bundle.mjs"}}</script>
+</head>
+<body>
+<header>
+	<h1>portrait-webCLI</h1>
+	<span class="pill">photo to VRM</span>
+	<span class="badge-local" title="Verify in DevTools, Network tab">&#9679; 100% local &middot; zero egress</span>
+	<a class="gh-link" href="https://github.com/tejaswigowda/portrait-webCLI" target="_blank" rel="noopener noreferrer">GitHub</a>
+</header>
+
+<main class="container">
+	<div class="statusbar"><span class="dot" id="dot"></span><span id="statusText" role="status" aria-live="polite" data-testid="status">Choose a photo of a face to begin.</span></div>
+
+	<p class="lead">Start from a photo. The page reads the face on your device, makes a face-blendshape GLB from it, and drives a base VRM's expression blendshapes from that GLB's morphs. Optionally it moves the VRM's face shape, hair shape and colors toward the photo. The skeleton, skin weights and existing blendshapes are not changed, and the hairstyle can be re-laid as waves, curls or coils or switched to a cut preset (no new hair is added).</p>
+
+	<div class="boxes">
+		<details class="box" name="info"><summary><strong>Stays on this device</strong></summary><p>Your photo, the face GLB made from it, and everything derived from them are processed in this page and are never sent to any server. The face model runs locally from files served with this page (nothing from a CDN). The page makes GET requests only, and the whole thing works with the network off once the page has loaded.</p></details>
+		<details class="box" name="info"><summary><strong>Approximate, not a likeness guarantee</strong></summary><p>The binding makes the VRM's expressions drivable from the face source. The shape and color matching below is a rough, measured nudge (eye size and spacing, mouth, jaw, profile depth; skin, hair, eye and brow color); an anime base will still look like an anime character.</p></details>
+	</div>
+
+	<div class="layout">
+	<div class="col">
+		<div class="card"><div class="card-header">1 &middot; Inputs</div><div class="card-body">
+			<section class="section">
+				<h3>Face photo</h3>
+				<div class="row">
+					<label class="btn btn-primary" for="imageFile">Choose a photo</label>
+					<input type="file" id="imageFile" data-testid="photo-input" accept="image/*" class="sr">
+					<span class="muted small">or</span>
+					<button id="camOpen" type="button" class="btn btn-ghost">Use the webcam</button>
+				</div>
+				<p class="note">A clear, front-facing face. The photo stays on this device.</p>
+				<div id="camBox" hidden>
+					<video id="camVideo" playsinline muted></video>
+					<div class="row"><button id="camShot" type="button" class="btn btn-primary btn-sm">Take selfie</button> <button id="camCancel" type="button" class="btn btn-ghost btn-sm">Cancel</button></div>
+					<p class="note">Video only (no microphone), nothing is recorded or uploaded, and the camera is switched off as soon as the selfie is taken. Face the camera, eyes open, even light.</p>
+				</div>
+				<div class="thumbs">
+					<figure><img id="preview" alt="Your photo (shown here only; it is not uploaded)" hidden><figcaption id="previewCap" class="muted small" hidden>Your photo</figcaption></figure>
+					<figure id="maskFig" hidden><canvas id="maskCanvas" hidden></canvas><figcaption id="maskNote" class="muted small" hidden>Pink: the hair the on-device segmenter found. The hair shape is based on this silhouette.</figcaption></figure>
+				</div>
+				<p class="note">On-device face model: <span id="model">loading…</span></p>
+				<a id="faceGlbLink" class="btn btn-ghost btn-sm" hidden>Download the face GLB made from your photo</a>
+				<details class="more">
+					<summary>Already have a face-blendshape GLB? Use it instead of a photo</summary>
+					<label for="faceFile" class="muted small">Face-blendshape GLB (local file only)</label>
+					<input type="file" id="faceFile" data-testid="face-input" accept=".glb"> <span id="faceName" class="muted small"></span>
+				</details>
+			</section>
+			<section class="section">
+				<h3>Base VRM</h3>
+				<select id="base" aria-label="Base VRM">
+					<option value="male" selected>Male (VRoid base, bundled)</option>
+					<option value="female">Female (VRoid base, bundled)</option>
+				</select>
+				<details class="more">
+					<summary>Use your own VRM instead (a local file or a URL)</summary>
+					<label for="vrmUrl" class="muted small">A URL (GET) or a local file (overrides the choice above)</label>
+					<input type="text" id="vrmUrl" data-testid="vrm-url" placeholder="https://raw.githubusercontent.com/…/base.vrm">
+					<input type="file" id="vrmFile" data-testid="vrm-input" accept=".vrm,.glb"> <span id="vrmName" class="muted small"></span>
+				</details>
+			</section>
+		</div></div>
+
+		<div class="card"><div class="card-header">2 &middot; Match the photo</div><div class="card-body">
+			<p class="note">Optional and approximate; everything is applied to the VRM's own geometry and materials.</p>
+			<div class="checks">
+				<label><input type="checkbox" id="shapeOn" checked><span>Face shape: eye size and spacing, mouth width, jaw, nose / lips / chin depth <span class="muted">(moves the face's base positions; every blendshape keeps working)</span></span></label>
+				<label><input type="checkbox" id="hairShapeOn" checked><span>Hair shape: volume, height, length and fringe of the existing hairstyle <span class="muted">(needs a photo that shows the whole head)</span></span></label>
+				<label><input type="checkbox" id="facialHairOn" checked><span>Facial hair: paint a mustache, beard or stubble onto the face texture when the photo has one <span class="muted">(estimated from how dark the lower face is next to the cheeks; texture only, no geometry)</span></span></label>
+			</div>
+			<div class="field-inline"><label for="hairCut">Hair cut</label>
+				<select id="hairCut"><option value="photo" selected>As in the photo</option><option value="keep">Keep the VRM's cut</option><option value="crop">Short crop</option><option value="bob">Bob</option><option value="long">Long</option><option value="afro">Afro</option></select>
+				<label for="hairTexture">Texture</label>
+				<select id="hairTexture"><option value="auto" selected>Auto (estimated from the photo)</option><option value="straight">Straight</option><option value="wavy">Wavy</option><option value="curly">Curly</option><option value="coily">Coily</option></select></div>
+			<p class="note">Re-lays each lock as a wave, curl or coil on the VRM's own hair cards; a cut preset replaces the photo's silhouette; braids, buns and ponytails are not possible.</p>
+			<div class="field-inline"><label for="hairHug">Scalp hug</label><input type="range" id="hairHug" min="0" max="100" value="80"></div>
+			<p class="note">Pulls hair that the lift has raised off the skull back toward it, so it does not look like a wig; 0 keeps the full lift.</p>
+			<div class="field-inline"><label for="shapeStrength">Shape strength</label><input type="range" id="shapeStrength" min="0" max="100" value="100"> <span id="shapeStrengthValue">100%</span></div>
+			<div class="checks">
+				<label><input type="checkbox" id="lookSkin" checked><span>Skin tone</span></label>
+				<label><input type="checkbox" id="lookHair" checked><span>Hair color <span class="muted">(read by an on-device hair segmenter)</span></span></label>
+				<label><input type="checkbox" id="lookIris" checked><span>Eye color</span></label>
+				<label><input type="checkbox" id="lookBrow" checked><span>Brow color</span></label>
+			</div>
+			<div class="field-inline"><label for="lookStrength">Color strength</label><input type="range" id="lookStrength" min="0" max="100" value="70"> <span id="lookStrengthValue">70%</span></div>
+			<p class="note">The hairstyle is the VRM's own hair cards, scaled, shifted and optionally re-laid; the texture guessed from the photo is a rough estimate you can override. The body and the skeleton are not changed, and the photo's texture is not painted onto the avatar. With a face GLB instead of a photo only the skin tone applies (there are no measurements or hair/eye/brow colors in it).</p>
+		</div></div>
+
+		<div class="card" id="bindCard"><div class="card-body">
+			<button id="bind" data-testid="bind" type="button" class="btn btn-primary btn-block">Bind</button>
+			<a id="download" data-testid="download" class="btn btn-success btn-block" hidden>Download</a>
+			<div id="progress" hidden role="progressbar" aria-label="Progress" aria-live="polite"><div class="busybar" id="pbar"><div id="pfill"></div></div><span id="plabel"></span></div>
+			<div id="resolutionWarn" class="box warn" hidden></div>
+		</div></div>
+	</div>
+
+	<div class="col">
+		<div id="previewBox" class="card" hidden><div class="card-header">3 &middot; Preview <a class="btn btn-ghost btn-sm" href="https://look.webcli.app/" target="_blank" rel="noopener noreferrer" title="Download the VRM, then open it in look-webCLI to edit textures, materials and outfit. Nothing is sent: it is an ordinary link.">Edit the look in look-webCLI &#8599;</a></div><div class="card-body">
+			<div class="opts">
+				<label><input type="radio" name="view" id="view_bound" checked> Bound (reshaped, recolored)</label>
+				<label><input type="radio" name="view" id="view_base"> Base VRM</label>
+				<label><input type="checkbox" id="baldOn"> Bald: remove the hair</label>
+			</div>
+			<p class="note">Bald binds the VRM again without its hair, so the preview and the download are the same file.</p>
+			<div id="preview3d"></div>
+			<div class="opts"><strong>Shading</strong>
+				<label><input type="radio" name="shade" id="shade_flat"> Flat (the VRM's own unlit materials)</label>
+				<label><input type="radio" name="shade" id="shade_lit" checked> Toon-lit (shows the normals)</label>
+			</div>
+			<div class="opts"><strong>Expression</strong>
+				<label><input type="radio" name="expr" id="expr_photo"> From the photo</label>
+				<label><input type="radio" name="expr" id="expr_neutral"> Neutral</label>
+				<label><input type="radio" name="expr" id="expr_manual"> Sliders</label>
+			</div>
+			<p id="previewNote" class="note"></p>
+			<div class="sliders">
+				<label>Jaw open <input type="range" id="x_jawOpen" min="0" max="100" value="0"></label>
+				<label>Smile <input type="range" id="x_smile" min="0" max="100" value="0"></label>
+				<label>Blink <input type="range" id="x_blink" min="0" max="100" value="0"></label>
+				<label>Brows up <input type="range" id="x_browsUp" min="0" max="100" value="0"></label>
+				<button id="xReset" type="button" class="btn btn-ghost btn-sm">Reset expression</button>
+			</div>
+			<p class="note">The expression is mapped through the bind map (face morph to VRM expression). The preview is drawn on this device from the bytes in this page.</p>
+		</div></div>
+		<div id="report" data-testid="result"></div>
+		<div class="card"><div class="card-header">Network audit</div><div class="card-body"><pre id="net">(no requests)</pre></div></div>
+	</div>
+	</div>
+</main>
+
+<footer><div class="card"><div class="card-header">Agent use</div><div class="card-body">
+	<p><code>?vrm=male|female|URL&amp;run=bind</code> starts the bind as soon as a photo (or face GLB) is supplied from local disk. The photo and the face GLB are identity data and are <b>never</b> read from a URL (<code>image=</code> / <code>face=</code> are refused). Add <code>&amp;download=1</code> to also trigger the download.</p>
+	<p>The page sets <code>document.body.dataset.webcliStatus</code> (<code>idle | running | done | error</code>) and <code>window.__webcli_result = { ok, op: 'bind', artifact: { mime, name, size, dataUrl }, error, meta }</code>. <code>window.__portrait.run({ vrm, image, face, look, shape, hairShape, hairStyle, facialHair, bald })</code> takes <code>'male'</code> (default), <code>'female'</code>, a URL or a File for <code>vrm</code>, and a File (or Blob or bytes) for <code>image</code> / <code>face</code>. Hooks: <code>data-testid</code> <code>photo-input</code>, <code>face-input</code>, <code>vrm-input</code>, <code>vrm-url</code>, <code>bind</code>, <code>download</code>, <code>result</code>, <code>status</code>.</p>
+</div></div></footer>
+<script type="module" src="page.js"></script>
+</body>
+</html>

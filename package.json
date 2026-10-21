@@ -1,0 +1,34 @@
+{
+  "name": "portrait-webCLI",
+  "version": "0.1.0",
+  "description": "Client-side, offline photo-to-VRM: a face photo and a base VRM in, a face-bound VRM out. Zero egress.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test:unit": "node tests/facebind.test.mjs && node tests/faceRefine.test.mjs && node tests/morphDeltas.test.mjs",
+    "test:static": "node tests/static.test.mjs",
+    "test:e2e": "node tests/e2e.test.mjs",
+    "test": "npm run test:unit && npm run test:static && npm run test:e2e"
+  },
+  "keywords": [
+    "vrm",
+    "avatar",
+    "face",
+    "blendshapes",
+    "arkit",
+    "mediapipe",
+    "offline",
+    "client-side",
+    "no-server",
+    "privacy",
+    "webCLI"
+  ],
+  "author": "Tejaswi Gowda",
+  "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

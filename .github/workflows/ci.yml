@@ -1,0 +1,19 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # unit tests (bind libraries), static checks (CSP, import-map hash, no network code, contract),
+      # then the page in a real browser: zero-egress, offline, run=bind and the result handle
+      - run: npm test
